@@ -14,7 +14,6 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
 
-      # FIX #3: Quotes required around version string
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -25,30 +24,14 @@ jobs:
           mkdir -p app/src/main/java/com/example/wifiaudio
           mkdir -p app/src/main/res/layout
           mkdir -p app/src/main/res/values
-          # FIX #1 & #2: Create wrapper infrastructure (no system Gradle needed)
-          mkdir -p gradle/wrapper
-          curl -sL "https://raw.githubusercontent.com/gradle/gradle/v8.1.1/gradle/wrapper/gradle-wrapper.jar" \
-               -o gradle/wrapper/gradle-wrapper.jar
 
-          cat << 'EOF' > gradle/wrapper/gradle-wrapper.properties
-          distributionBase=GRADLE_USER_HOME
-          distributionPath=wrapper/dists
-          distributionUrl=https\://services.gradle.org/distributions/gradle-8.1.1-bin.zip
-          zipStoreBase=GRADLE_USER_HOME
-          zipStorePath=wrapper/dists
-          EOF
-
-          curl -sL "https://raw.githubusercontent.com/gradle/gradle/v8.1.1/gradlew" \
-               -o gradlew
-
-          # FIX #4: Create local.properties with Android SDK path
-          echo "sdk.dir=${ANDROID_HOME}" > local.properties
-
+          # 1. AndroidX Support Enabler (gradle.properties)
           cat << 'EOF' > gradle.properties
           android.useAndroidX=true
           org.gradle.jvmargs=-Xmx2048m
           EOF
 
+          # 2. Root settings.gradle
           cat << 'EOF' > settings.gradle
           pluginManagement {
               repositories {
@@ -58,8 +41,7 @@ jobs:
               }
           }
           dependencyResolutionManagement {
-              # FIX #11: Use FAIL_ON_PROJECT_REPOS for deterministic builds
-              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
               repositories {
                   google()
                   mavenCentral()
@@ -69,14 +51,15 @@ jobs:
           include ':app'
           EOF
 
+          # 3. Root build.gradle (FIX #1: Kotlin 1.9.0 for AGP 8.1.1 compat)
           cat << 'EOF' > build.gradle
           plugins {
               id 'com.android.application' version '8.1.1' apply false
-              # FIX #10: Use Kotlin 1.9.0 (compatible with AGP 8.1.1)
               id 'org.jetbrains.kotlin.android' version '1.9.0' apply false
           }
           EOF
 
+          # 4. App build.gradle (FIX #2: lint block replaces lintOptions)
           cat << 'EOF' > app/build.gradle
           plugins {
               id 'com.android.application'
@@ -84,16 +67,15 @@ jobs:
           }
 
           android {
-              namespace = 'com.example.wifiaudio'
-              # FIX #6: Use explicit assignment syntax for AGP 8.x
-              compileSdk = 34
+              namespace 'com.example.wifiaudio'
+              compileSdk 34
 
               defaultConfig {
-                  applicationId = "com.example.wifiaudio"
-                  minSdk = 29
-                  targetSdk = 34
-                  versionCode = 1
-                  versionName = "1.0"
+                  applicationId "com.example.wifiaudio"
+                  minSdk 29
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
               }
 
               compileOptions {
@@ -103,7 +85,6 @@ jobs:
               kotlinOptions {
                   jvmTarget = '17'
               }
-              # FIX #5: lintOptions → lint (renamed in AGP 7.0+)
               lint {
                   abortOnError false
               }
@@ -116,8 +97,58 @@ jobs:
           }
           EOF
 
-          # ... (AndroidManifest, strings, layout — unchanged) ...
+          # 5. Android Manifest (FIX #3: removed package attribute; FIX #4: added MODIFY_AUDIO_SETTINGS)
+          cat << 'EOF' > app/src/main/AndroidManifest.xml
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.RECORD_AUDIO" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
+              <application
+                  android:allowBackup="true"
+                  android:label="Wi-Fi Audio Streamer"
+                  android:theme="@style/Theme.AppCompat.NoActionBar">
+
+                  <activity android:name=".MainActivity" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+
+                  <service
+                      android:name=".AudioCaptureService"
+                      android:foregroundServiceType="mediaProjection"
+                      android:exported="false" />
+              </application>
+          </manifest>
+          EOF
+
+          # 6. Strings XML
+          cat << 'EOF' > app/src/main/res/values/strings.xml
+          <resources><string name="app_name">Wi-Fi Audio</string></resources>
+          EOF
+
+          # 7. Activity Main Layout
+          cat << 'EOF' > app/src/main/res/layout/activity_main.xml
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent" android:layout_height="match_parent"
+              android:orientation="vertical" android:background="#0A0A0A" android:padding="24dp" android:gravity="center">
+              <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                  android:text="WI-FI INTERNAL AUDIO" android:textColor="#00FF41" android:textSize="22sp" android:textStyle="bold" android:layout_marginBottom="30dp"/>
+              <EditText android:id="@+id/etIp" android:layout_width="match_parent" android:layout_height="50dp"
+                  android:hint="PC IP Address (e.g. 192.168.43.1)" android:textColorHint="#555555" android:textColor="#FFFFFF" android:backgroundTint="#00FF41" android:inputType="text" android:layout_marginBottom="15dp"/>
+              <EditText android:id="@+id/etPort" android:layout_width="match_parent" android:layout_height="50dp"
+                  android:text="50005" android:textColor="#FFFFFF" android:backgroundTint="#00FF41" android:inputType="number" android:layout_marginBottom="30dp"/>
+              <Button android:id="@+id/btnStream" android:layout_width="match_parent" android:layout_height="55dp"
+                  android:text="START STREAMING" android:backgroundTint="#008024" android:textColor="#FFFFFF" android:textStyle="bold"/>
+          </LinearLayout>
+          EOF
+
+          # 8. MainActivity.kt
           cat << 'EOF' > app/src/main/java/com/example/wifiaudio/MainActivity.kt
           package com.example.wifiaudio
           import android.Manifest
@@ -141,7 +172,6 @@ jobs:
           import android.widget.Button
           import android.widget.EditText
           import android.widget.Toast
-          import androidx.activity.result.contract.ActivityResultContracts
           import androidx.appcompat.app.AppCompatActivity
           import androidx.core.app.ActivityCompat
           import androidx.core.app.NotificationCompat
@@ -151,41 +181,18 @@ jobs:
           import java.net.InetAddress
           import kotlin.concurrent.thread
 
+          var sharedMediaProjectionIntent: Intent? = null
+
           class MainActivity : AppCompatActivity() {
+              private val REQUEST_MEDIA_PROJECTION = 1001
               private var ipAddress = ""
               private var portNumber = 50005
               private var isServiceRunning = false
 
-              # FIX #9: Use modern ActivityResult API (no deprecated onActivityResult)
-              private val mediaProjectionLauncher = registerForActivityResult(
-                  ActivityResultContracts.StartActivityForResult()
-              ) { result ->
-                  if (result.resultCode == RESULT_OK && result.data != null) {
-                      val serviceIntent = Intent(this, AudioCaptureService::class.java).apply {
-                          putExtra("IP", ipAddress)
-                          putExtra("PORT", portNumber)
-                          putExtra("RESULT_CODE", result.resultCode)
-                          # FIX #8: Pass Intent via extra, not package-level var
-                          putExtra("DATA", result.data)
-                      }
-                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                          startForegroundService(serviceIntent)
-                      } else {
-                          startService(serviceIntent)
-                      }
-                      isServiceRunning = true
-                      findViewById<Button>(R.id.btnStream).apply {
-                          text = "STOP STREAMING"
-                          setBackgroundColor(android.graphics.Color.parseColor("#FF3B30"))
-                      }
-                  } else {
-                      Toast.makeText(this, "Permission denied!", Toast.LENGTH_SHORT).show()
-                  }
-              }
-
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
                   setContentView(R.layout.activity_main)
+
                   val etIp = findViewById<EditText>(R.id.etIp)
                   val etPort = findViewById<EditText>(R.id.etPort)
                   val btnStream = findViewById<Button>(R.id.btnStream)
@@ -200,27 +207,58 @@ jobs:
                           if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                               permissions.add(Manifest.permission.POST_NOTIFICATIONS)
                           }
-                          val needed = permissions.filter {
-                              ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+
+                          val neededPermissions = permissions.filter {
+                              ContextCompat.checkSelfPermission(this@MainActivity, it) != PackageManager.PERMISSION_GRANTED
                           }
-                          if (needed.isNotEmpty()) {
-                              ActivityCompat.requestPermissions(this, needed.toTypedArray(), 100)
+
+                          if (neededPermissions.isNotEmpty()) {
+                              ActivityCompat.requestPermissions(this@MainActivity, neededPermissions.toTypedArray(), 100)
                               return@setOnClickListener
                           }
+
                           ipAddress = etIp.text.toString().trim()
                           portNumber = etPort.text.toString().trim().toIntOrNull() ?: 50005
                           if (ipAddress.isEmpty()) {
-                              Toast.makeText(this, "Enter PC IP Address!", Toast.LENGTH_SHORT).show()
+                              Toast.makeText(this@MainActivity, "Enter PC IP Address!", Toast.LENGTH_SHORT).show()
                               return@setOnClickListener
                           }
-                          val mpManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-                          mediaProjectionLauncher.launch(mpManager.createScreenCaptureIntent())
+
+                          val mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                          startActivityForResult(mediaProjectionManager.createScreenCaptureIntent(), REQUEST_MEDIA_PROJECTION)
+                      }
+                  }
+              }
+
+              override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+                  super.onActivityResult(requestCode, resultCode, data)
+                  if (requestCode == REQUEST_MEDIA_PROJECTION) {
+                      if (resultCode == RESULT_OK && data != null) {
+                          sharedMediaProjectionIntent = data
+                          val serviceIntent = Intent(this@MainActivity, AudioCaptureService::class.java).apply {
+                              putExtra("IP", ipAddress)
+                              putExtra("PORT", portNumber)
+                              putExtra("RESULT_CODE", resultCode)
+                          }
+                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                              startForegroundService(serviceIntent)
+                          } else {
+                              startService(serviceIntent)
+                          }
+                          isServiceRunning = true
+                          val btnStream = findViewById<Button>(R.id.btnStream)
+                          btnStream.text = "STOP STREAMING"
+                          btnStream.setBackgroundColor(android.graphics.Color.parseColor("#FF3B30"))
+                      } else {
+                          Toast.makeText(this@MainActivity, "Permission denied!", Toast.LENGTH_SHORT).show()
                       }
                   }
               }
 
               private fun stopAudioService() {
-                  stopService(Intent(this, AudioCaptureService::class.java))
+                  val serviceIntent = Intent(this@MainActivity, AudioCaptureService::class.java)
+                  stopService(serviceIntent)
+                  sharedMediaProjectionIntent = null
                   isServiceRunning = false
               }
           }
@@ -244,14 +282,15 @@ jobs:
                   val ip = intent?.getStringExtra("IP") ?: ""
                   val port = intent?.getIntExtra("PORT", 50005) ?: 50005
                   val resultCode = intent?.getIntExtra("RESULT_CODE", 0) ?: 0
-                  # FIX #8: Read Intent from extra (not a global variable)
-                  @Suppress("DEPRECATION")
-                  val resultData: Intent = intent?.getParcelableExtra("DATA")
-                      ?: run { stopSelf(); return START_NOT_STICKY }
 
-                  if (ip.isEmpty() || resultCode == 0) {
-                      stopSelf(); return START_NOT_STICKY
+                  val resultDataLocal = sharedMediaProjectionIntent
+
+                  if (ip.isEmpty() || resultCode == 0 || resultDataLocal == null) {
+                      stopSelf()
+                      return START_NOT_STICKY
                   }
+
+                  val resultData: Intent = resultDataLocal
 
                   startNotification()
 
@@ -260,12 +299,16 @@ jobs:
 
                   if (mediaProjection != null) {
                       isStreaming = true
+
                       audioManager?.let {
                           originalVolume = it.getStreamVolume(AudioManager.STREAM_MUSIC)
                           it.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0)
                       }
+
                       startAudioStream(ip, port)
-                  } else { stopSelf() }
+                  } else {
+                      stopSelf()
+                  }
 
                   return START_STICKY
               }
@@ -273,18 +316,18 @@ jobs:
               private fun startNotification() {
                   val channelId = "WiFiAudioChannel"
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                      val channel = NotificationChannel(
-                          channelId, "Wi-Fi Audio Streaming", NotificationManager.IMPORTANCE_LOW)
-                      getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)
+                      val channel = NotificationChannel(channelId, "Wi-Fi Audio Streaming", NotificationManager.IMPORTANCE_LOW)
+                      val manager = getSystemService(NotificationManager::class.java)
+                      manager?.createNotificationChannel(channel)
                   }
-                  val notification: Notification = NotificationCompat.Builder(this, channelId)
+                  val notification: Notification = NotificationCompat.Builder(this@AudioCaptureService, channelId)
                       .setContentTitle("Wi-Fi Audio Streaming")
-                      .setContentText("Streaming internal audio to PC...")
+                      .setContentText("Streaming internal audio silently to PC...")
                       .setSmallIcon(android.R.drawable.ic_media_play)
                       .build()
+
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                      startForeground(1, notification,
-                          android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+                      startForeground(1, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
                   } else {
                       startForeground(1, notification)
                   }
@@ -296,17 +339,17 @@ jobs:
                           socket = DatagramSocket()
                           val address = InetAddress.getByName(ip)
                           val sampleRate = 22050
+
                           if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && mediaProjection != null) {
                               val config = AudioPlaybackCaptureConfig.Builder(mediaProjection!!)
                                   .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
                                   .addMatchingUsage(AudioAttributes.USAGE_GAME)
                                   .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
                                   .build()
-                              val bufferSize = AudioRecord.getMinBufferSize(
-                                  sampleRate, AudioFormat.CHANNEL_IN_MONO,
-                                  AudioFormat.ENCODING_PCM_16BIT) * 2
-                              if (ContextCompat.checkSelfPermission(this,
-                                      Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+
+                              val bufferSize = AudioRecord.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT) * 2
+
+                              if (ContextCompat.checkSelfPermission(this@AudioCaptureService, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
                                   audioRecord = AudioRecord.Builder()
                                       .setAudioFormat(AudioFormat.Builder()
                                           .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
@@ -316,49 +359,58 @@ jobs:
                                       .setAudioPlaybackCaptureConfig(config)
                                       .setBufferSizeInBytes(bufferSize)
                                       .build()
+
                                   val buffer = ByteArray(1024)
                                   audioRecord?.startRecording()
+
                                   while (isStreaming) {
                                       val read = audioRecord?.read(buffer, 0, buffer.size) ?: 0
-                                      if (read > 0) socket?.send(DatagramPacket(buffer, read, address, port))
+                                      if (read > 0) {
+                                          val packet = DatagramPacket(buffer, read, address, port)
+                                          socket?.send(packet)
+                                      }
                                   }
                               }
                           }
-                      } catch (e: Exception) { e.printStackTrace() }
-                      finally { stopStreaming() }
+                      } catch (e: Exception) {
+                          e.printStackTrace()
+                      } finally {
+                          stopStreaming()
+                      }
                   }
               }
 
               private fun stopStreaming() {
                   isStreaming = false
-                  audioManager?.setStreamVolume(AudioManager.STREAM_MUSIC, originalVolume, 0)
-                  try { audioRecord?.stop(); audioRecord?.release() } catch (e: Exception) {}
-                  try { mediaProjection?.stop() } catch (e: Exception) {}
-                  socket?.close()
-                  # FIX #7: stopForeground(boolean) deprecated in API 33
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                      stopForeground(STOP_FOREGROUND_REMOVE)
-                  } else {
-                      @Suppress("DEPRECATION")
-                      stopForeground(true)
+
+                  audioManager?.let {
+                      it.setStreamVolume(AudioManager.STREAM_MUSIC, originalVolume, 0)
                   }
+
+                  try {
+                      audioRecord?.stop()
+                      audioRecord?.release()
+                  } catch (e: Exception) {}
+                  try {
+                      mediaProjection?.stop()
+                  } catch (e: Exception) {}
+                  socket?.close()
+                  stopForeground(true)
                   stopSelf()
               }
 
-              override fun onDestroy() { stopStreaming(); super.onDestroy() }
+              override fun onDestroy() {
+                  stopStreaming()
+                  super.onDestroy()
+              }
           }
           EOF
 
-      # REMOVED: "Generate Local Wrapper" step — it was broken & unnecessary
-      # (wrapper files are now created inline in the step above)
+      - name: Generate Local Wrapper
+        run: gradle wrapper --gradle-version 8.1.1
 
-      # FIX #1: Make gradlew executable before running it
-      - name: Make gradlew Executable
-        run: chmod +x ./gradlew
-
-      # FIX #12: Add --no-daemon and --stacktrace for CI
       - name: Compile App Package (Build APK)
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        run: ./gradlew assembleDebug
 
       - name: Upload Finished APK
         uses: actions/upload-artifact@v4
