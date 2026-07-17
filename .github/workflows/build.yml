@@ -130,7 +130,7 @@ jobs:
           <resources><string name="app_name">Wi-Fi Audio</string></resources>
           EOF
 
-          # 7. Activity Main Layout (Fixing the layout compile error)
+          # 7. Activity Main Layout
           cat << 'EOF' > app/src/main/res/layout/activity_main.xml
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
               android:layout_width="match_parent" android:layout_height="match_parent"
@@ -146,7 +146,7 @@ jobs:
           </LinearLayout>
           EOF
 
-          # 8. MainActivity.kt
+          # 8. MainActivity.kt (Featuring Companion Object Type-Safe Bridge)
           cat << 'EOF' > app/src/main/java/com/example/wifiaudio/MainActivity.kt
           package com.example.wifiaudio
           import android.Manifest
@@ -184,6 +184,10 @@ jobs:
               private var ipAddress = ""
               private var portNumber = 50005
               private var isServiceRunning = false
+
+              companion object {
+                  var mediaProjectionData: Intent? = null
+              }
 
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
@@ -230,11 +234,11 @@ jobs:
                   super.onActivityResult(requestCode, resultCode, data)
                   if (requestCode == REQUEST_MEDIA_PROJECTION) {
                       if (resultCode == RESULT_OK && data != null) {
+                          mediaProjectionData = data
                           val serviceIntent = Intent(this, AudioCaptureService::class.java).apply {
                               putExtra("IP", ipAddress)
                               putExtra("PORT", portNumber)
                               putExtra("RESULT_CODE", resultCode)
-                              putExtra("RESULT_DATA", data)
                           }
                           if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                               startForegroundService(serviceIntent)
@@ -254,6 +258,7 @@ jobs:
               private fun stopAudioService() {
                   val serviceIntent = Intent(this, AudioCaptureService::class.java)
                   stopService(serviceIntent)
+                  mediaProjectionData = null
                   isServiceRunning = false
               }
           }
@@ -278,12 +283,7 @@ jobs:
                   val port = intent?.getIntExtra("PORT", 50005) ?: 50005
                   val resultCode = intent?.getIntExtra("RESULT_CODE", 0) ?: 0
                   
-                  val resultData: Intent? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                      intent?.getParcelableExtra("RESULT_DATA", Intent::class.java)
-                  } else {
-                      @Suppress("DEPRECATION")
-                      intent?.getParcelableExtra("RESULT_DATA") as? Intent
-                  }
+                  val resultData = MainActivity.mediaProjectionData
 
                   if (ip.isEmpty() || resultCode == 0 || resultData == null) {
                       stopSelf()
