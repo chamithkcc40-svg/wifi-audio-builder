@@ -58,7 +58,7 @@ jobs:
           }
           EOF
 
-          # 4. App build.gradle
+          # 4. App build.gradle (Using highly stable dependency versions)
           cat << 'EOF' > app/build.gradle
           plugins {
               id 'com.android.application'
@@ -90,15 +90,15 @@ jobs:
           }
 
           dependencies {
-              implementation 'androidx.core:core-ktx:1.10.0'
+              implementation 'androidx.core:core-ktx:1.12.0'
               implementation 'androidx.appcompat:appcompat:1.6.1'
-              implementation 'com.google.android.material:material:1.9.0'
+              implementation 'com.google.android.material:material:1.11.0'
           }
           EOF
 
-          # 5. Android Manifest
+          # 5. Android Manifest (With explicitly defined package for legacy system safety)
           cat << 'EOF' > app/src/main/AndroidManifest.xml
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.example.wifiaudio">
               <uses-permission android:name="android.permission.INTERNET" />
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -146,7 +146,7 @@ jobs:
           </LinearLayout>
           EOF
 
-          # 8. MainActivity.kt (Featuring Companion Object Type-Safe Bridge)
+          # 8. MainActivity.kt (Featuring Package-Level Global Safe Variable)
           cat << 'EOF' > app/src/main/java/com/example/wifiaudio/MainActivity.kt
           package com.example.wifiaudio
           import android.Manifest
@@ -179,15 +179,14 @@ jobs:
           import java.net.InetAddress
           import kotlin.concurrent.thread
 
+          // Standard global variable at file level to prevent compiler smart-cast errors
+          var sharedMediaProjectionIntent: Intent? = null
+
           class MainActivity : AppCompatActivity() {
               private val REQUEST_MEDIA_PROJECTION = 1001
               private var ipAddress = ""
               private var portNumber = 50005
               private var isServiceRunning = false
-
-              companion object {
-                  var mediaProjectionData: Intent? = null
-              }
 
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
@@ -209,18 +208,18 @@ jobs:
                           }
                           
                           val neededPermissions = permissions.filter {
-                              ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+                              ContextCompat.checkSelfPermission(this@MainActivity, it) != PackageManager.PERMISSION_GRANTED
                           }
 
                           if (neededPermissions.isNotEmpty()) {
-                              ActivityCompat.requestPermissions(this, neededPermissions.toTypedArray(), 100)
+                              ActivityCompat.requestPermissions(this@MainActivity, neededPermissions.toTypedArray(), 100)
                               return@setOnClickListener
                           }
 
                           ipAddress = etIp.text.toString().trim()
                           portNumber = etPort.text.toString().trim().toIntOrNull() ?: 50005
                           if (ipAddress.isEmpty()) {
-                              Toast.makeText(this, "Enter PC IP Address!", Toast.LENGTH_SHORT).show()
+                              Toast.makeText(this@MainActivity, "Enter PC IP Address!", Toast.LENGTH_SHORT).show()
                               return@setOnClickListener
                           }
 
@@ -234,8 +233,8 @@ jobs:
                   super.onActivityResult(requestCode, resultCode, data)
                   if (requestCode == REQUEST_MEDIA_PROJECTION) {
                       if (resultCode == RESULT_OK && data != null) {
-                          mediaProjectionData = data
-                          val serviceIntent = Intent(this, AudioCaptureService::class.java).apply {
+                          sharedMediaProjectionIntent = data
+                          val serviceIntent = Intent(this@MainActivity, AudioCaptureService::class.java).apply {
                               putExtra("IP", ipAddress)
                               putExtra("PORT", portNumber)
                               putExtra("RESULT_CODE", resultCode)
@@ -250,15 +249,15 @@ jobs:
                           btnStream.text = "STOP STREAMING"
                           btnStream.setBackgroundColor(android.graphics.Color.parseColor("#FF3B30"))
                       } else {
-                          Toast.makeText(this, "Permission denied!", Toast.LENGTH_SHORT).show()
+                          Toast.makeText(this@MainActivity, "Permission denied!", Toast.LENGTH_SHORT).show()
                       }
                   }
               }
 
               private fun stopAudioService() {
-                  val serviceIntent = Intent(this, AudioCaptureService::class.java)
+                  val serviceIntent = Intent(this@MainActivity, AudioCaptureService::class.java)
                   stopService(serviceIntent)
-                  mediaProjectionData = null
+                  sharedMediaProjectionIntent = null
                   isServiceRunning = false
               }
           }
@@ -283,12 +282,15 @@ jobs:
                   val port = intent?.getIntExtra("PORT", 50005) ?: 50005
                   val resultCode = intent?.getIntExtra("RESULT_CODE", 0) ?: 0
                   
-                  val resultData = MainActivity.mediaProjectionData
+                  val resultDataLocal = sharedMediaProjectionIntent
 
-                  if (ip.isEmpty() || resultCode == 0 || resultData == null) {
+                  if (ip.isEmpty() || resultCode == 0 || resultDataLocal == null) {
                       stopSelf()
                       return START_NOT_STICKY
                   }
+
+                  // Force-cast local val to non-null Intent to bypass all compiler smart-cast check bugs
+                  val resultData: Intent = resultDataLocal
 
                   startNotification()
 
@@ -318,7 +320,7 @@ jobs:
                       val manager = getSystemService(NotificationManager::class.java)
                       manager?.createNotificationChannel(channel)
                   }
-                  val notification: Notification = NotificationCompat.Builder(this, channelId)
+                  val notification: Notification = NotificationCompat.Builder(this@AudioCaptureService, channelId)
                       .setContentTitle("Wi-Fi Audio Streaming")
                       .setContentText("Streaming internal audio silently to PC...")
                       .setSmallIcon(android.R.drawable.ic_media_play)
@@ -347,7 +349,7 @@ jobs:
 
                               val bufferSize = AudioRecord.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT) * 2
                               
-                              if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                              if (ContextCompat.checkSelfPermission(this@AudioCaptureService, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
                                   audioRecord = AudioRecord.Builder()
                                       .setAudioFormat(AudioFormat.Builder()
                                           .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
