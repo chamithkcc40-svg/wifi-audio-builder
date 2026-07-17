@@ -1,0 +1,199 @@
+name: Generate Android Live Audio APK
+on: [push, workflow_dispatch]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up JDK 17
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Auto-Generate Android Project Structure
+        run: |
+          mkdir -p app/src/main/java/com/example/wifiaudio
+          mkdir -p app/src/main/res/layout
+          mkdir -p app/src/main/res/values
+
+          # 1. Root settings.gradle.kts
+          cat << 'EOF' > settings.gradle.kts
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories { google(); mavenCentral() }
+          }
+          rootProject.name = "WiFiAudio"
+          include(":app")
+          EOF
+
+          # 2. Root build.gradle.kts
+          cat << 'EOF' > build.gradle.kts
+          plugins {
+              id("com.android.application") version "8.2.0" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.0" apply false
+          }
+          EOF
+
+          # 3. App build.gradle.kts
+          cat << 'EOF' > app/build.gradle.kts
+          plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
+          android {
+              namespace = "com.example.wifiaudio"
+              compileSdk = 34
+              defaultConfig {
+                  applicationId = "com.example.wifiaudio"
+                  minSdk = 26
+                  targetSdk = 34
+                  versionCode = 1
+                  versionName = "1.0"
+              }
+              buildTypes { release { isMinifyEnabled = false } }
+              compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
+              kotlinOptions { jvmTarget = "17" }
+          }
+          dependencies {
+              implementation("androidx.core:core-ktx:1.12.0")
+              implementation("androidx.appcompat:appcompat:1.6.1")
+              implementation("com.google.android.material:material:1.11.0")
+          }
+          EOF
+
+          # 4. Android Manifest
+          cat << 'EOF' > app/src/main/AndroidManifest.xml
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.RECORD_AUDIO" />
+              <application
+                  android:allowBackup="true"
+                  android:label="Wi-Fi Audio Streamer"
+                  android:theme="@style/Theme.AppCompat.NoActionBar">
+                  <activity android:name=".MainActivity" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          # 5. Strings XML
+          cat << 'EOF' > app/src/main/res/values/strings.xml
+          <resources><string name="app_name">Wi-Fi Audio</string></resources>
+          EOF
+
+          # 6. Activity Main Layout (Cyber Green Dark Theme UI)
+          cat << 'EOF' > app/src/main/res/layout/activity_main.xml
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent" android:layout_height="match_parent"
+              android:orientation="vertical" android:background="#0A0A0A" android:padding="24dp" android:gravity="center">
+              <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                  android:text="WI-FI AUDIO LINK" android:textColor="#00FF41" android:textSize="22sp" android:textStyle="bold" android:layout_marginBottom="30dp"/>
+              <EditText android:id="@+id/etIp" android:layout_width="match_parent" android:layout_height="50dp"
+                  android:hint="PC IP Address (e.g. 192.168.43.1)" android:textColorHint="#555555" android:textColor="#FFFFFF" android:backgroundTint="#00FF41" android:inputType="text" android:layout_marginBottom="15dp"/>
+              <EditText android:id="@+id/etPort" android:layout_width="match_parent" android:layout_height="50dp"
+                  android:text="50005" android:textColor="#FFFFFF" android:backgroundTint="#00FF41" android:inputType="number" android:layout_marginBottom="30dp"/>
+              <Button android:id="@+id/btnStream" android:layout_width="match_parent" android:layout_height="55dp"
+                  android:text="START STREAMING" android:backgroundTint="#008024" android:textColor="#FFFFFF" android:textStyle="bold"/>
+          </LinearLayout>
+          EOF
+
+          # 7. MainActivity.kt (High-speed UDP Streamer)
+          cat << 'EOF' > app/src/main/java/com/example/wifiaudio/MainActivity.kt
+          package com.example.wifiaudio
+          import android.Manifest
+          import android.content.pm.PackageManager
+          import android.media.AudioFormat
+          import android.media.AudioRecord
+          import android.media.MediaRecorder
+          import android.os.Bundle
+          import android.widget.Button
+          import android.widget.EditText
+          import android.widget.Toast
+          import androidx.appcompat.app.AppCompatActivity
+          import androidx.core.app.ActivityCompat
+          import java.net.DatagramPacket
+          import java.net.DatagramSocket
+          import java.net.InetAddress
+          import kotlin.concurrent.thread
+
+          class MainActivity : AppCompatActivity() {
+              private var isStreaming = false
+              private var socket: DatagramSocket? = null
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  setContentView(R.layout.activity_main)
+
+                  val etIp = findViewById<EditText>(R.id.etIp)
+                  val etPort = findViewById<EditText>(R.id.etPort)
+                  val btnStream = findViewById<Button>(R.id.btnStream)
+
+                  btnStream.setOnClickListener {
+                      if (isStreaming) {
+                          isStreaming = false
+                          btnStream.text = "START STREAMING"
+                          btnStream.setBackgroundColor(android.graphics.Color.parseColor("#008024"))
+                      } else {
+                          if (ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                              ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 100)
+                              return@setOnClickListener
+                          }
+                          val ip = etIp.text.toString().trim()
+                          val port = etPort.text.toString().trim().toIntOrNull() ?: 50005
+                          if (ip.isEmpty()) {
+                              Toast.makeText(this, "Enter PC IP Address!", Toast.LENGTH_SHORT).show()
+                              return@setOnClickListener
+                          }
+                          isStreaming = true
+                          btnStream.text = "STOP STREAMING"
+                          btnStream.setBackgroundColor(android.graphics.Color.parseColor("#FF3B30"))
+                          startAudioStream(ip, port)
+                      }
+                  }
+              }
+
+              private fun startAudioStream(ip: String, port: Int) {
+                  thread {
+                      try {
+                          socket = DatagramSocket()
+                          val address = InetAddress.getByName(ip)
+                          val sampleRate = 22050
+                          val bufferSize = AudioRecord.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT) * 2
+                          
+                          val audioRecord = AudioRecord(MediaRecorder.AudioSource.MIC, sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bufferSize)
+                          val buffer = ByteArray(1024)
+                          audioRecord.startRecording()
+
+                          while (isStreaming) {
+                              val read = audioRecord.read(buffer, 0, buffer.size)
+                              if (read > 0) {
+                                  val packet = DatagramPacket(buffer, read, address, port)
+                                  socket?.send(packet)
+                              }
+                          }
+                          audioRecord.stop()
+                          audioRecord.release()
+                          socket?.close()
+                      } catch (e: Exception) {
+                          runOnUiThread { Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_LONG).show() }
+                          isStreaming = false
+                      }
+                  }
+              }
+          }
+          EOF
+
+      - name: Initialize Gradle Wrapper
+        run: gradle wrapper --gradle-version 8.2
+
+      - name: Compile App Package (Build APK)
+        run: ./gradlew assembleDebug
+
+      - name: Export Ready APK File
+        uses: actions/artifacts-uploader@v1
+        with:
+          name: WiFiAudio-Android-App
+          path: app/build/outputs/apk/debug/app-debug.apk
