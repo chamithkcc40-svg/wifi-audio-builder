@@ -30,7 +30,7 @@ jobs:
           android.useAndroidX=true
           EOF
 
-          # 2. Root settings.gradle (Safe Repository Mode)
+          # 2. Root settings.gradle
           cat << 'EOF' > settings.gradle
           pluginManagement {
               repositories {
@@ -50,7 +50,7 @@ jobs:
           include ':app'
           EOF
 
-          # 3. Root build.gradle (Modern Declarative Plugins Block)
+          # 3. Root build.gradle
           cat << 'EOF' > build.gradle
           plugins {
               id 'com.android.application' version '8.1.1' apply false
@@ -71,7 +71,7 @@ jobs:
 
               defaultConfig {
                   applicationId "com.example.wifiaudio"
-                  minSdk 26
+                  minSdk 29
                   targetSdk 34
                   versionCode 1
                   versionName "1.0"
@@ -96,21 +96,31 @@ jobs:
           }
           EOF
 
-          # 5. Android Manifest
+          # 5. Android Manifest (With Foreground Services and MediaProjection Permissions)
           cat << 'EOF' > app/src/main/AndroidManifest.xml
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET" />
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              
               <application
                   android:allowBackup="true"
                   android:label="Wi-Fi Audio Streamer"
                   android:theme="@style/Theme.AppCompat.NoActionBar">
+                  
                   <activity android:name="com.example.wifiaudio.MainActivity" android:exported="true">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
                           <category android:name="android.intent.category.LAUNCHER" />
                       </intent-filter>
                   </activity>
+
+                  <service 
+                      android:name="com.example.wifiaudio.AudioCaptureService"
+                      android:foregroundServiceType="mediaProjection"
+                      android:exported="false" />
               </application>
           </manifest>
           EOF
@@ -126,7 +136,7 @@ jobs:
               android:layout_width="match_parent" android:layout_height="match_parent"
               android:orientation="vertical" android:background="#0A0A0A" android:padding="24dp" android:gravity="center">
               <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                  android:text="WI-FI AUDIO LINK" android:textColor="#00FF41" android:textSize="22sp" android:textStyle="bold" android:layout_marginBottom="30dp"/>
+                  android:text="WI-FI INTERNAL AUDIO" android:textColor="#00FF41" android:textSize="22sp" android:textStyle="bold" android:layout_marginBottom="30dp"/>
               <EditText android:id="@+id/etIp" android:layout_width="match_parent" android:layout_height="50dp"
                   android:hint="PC IP Address (e.g. 192.168.43.1)" android:textColorHint="#555555" android:textColor="#FFFFFF" android:backgroundTint="#00FF41" android:inputType="text" android:layout_marginBottom="15dp"/>
               <EditText android:id="@+id/etPort" android:layout_width="match_parent" android:layout_height="50dp"
@@ -136,28 +146,43 @@ jobs:
           </LinearLayout>
           EOF
 
-          # 8. MainActivity.kt (High-speed UDP Streamer)
+          # 8. MainActivity.kt (Featuring Auto-Muting Internal Audio Capture Service)
           cat << 'EOF' > app/src/main/java/com/example/wifiaudio/MainActivity.kt
           package com.example.wifiaudio
           import android.Manifest
+          import android.app.Notification
+          import android.app.NotificationChannel
+          import android.app.NotificationManager
+          import android.app.Service
+          import android.content.Context
+          import android.content.Intent
           import android.content.pm.PackageManager
+          import android.media.AudioAttributes
           import android.media.AudioFormat
+          import android.media.AudioManager
+          import android.media.AudioPlaybackCaptureConfig
           import android.media.AudioRecord
-          import android.media.MediaRecorder
+          import android.media.projection.MediaProjection
+          import android.media.projection.MediaProjectionManager
+          import android.os.Build
           import android.os.Bundle
+          import android.os.IBinder
           import android.widget.Button
           import android.widget.EditText
           import android.widget.Toast
           import androidx.appcompat.app.AppCompatActivity
           import androidx.core.app.ActivityCompat
+          import androidx.core.app.NotificationCompat
           import java.net.DatagramPacket
           import java.net.DatagramSocket
           import java.net.InetAddress
           import kotlin.concurrent.thread
 
           class MainActivity : AppCompatActivity() {
-              private var isStreaming = false
-              private var socket: DatagramSocket? = null
+              private val REQUEST_MEDIA_PROJECTION = 1001
+              private var ipAddress = ""
+              private var portNumber = 50005
+              private var isServiceRunning = false
 
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
@@ -168,26 +193,139 @@ jobs:
                   val btnStream = findViewById<Button>(R.id.btnStream)
 
                   btnStream.setOnClickListener {
-                      if (isStreaming) {
-                          isStreaming = false
+                      if (isServiceRunning) {
+                          stopAudioService()
                           btnStream.text = "START STREAMING"
                           btnStream.setBackgroundColor(android.graphics.Color.parseColor("#008024"))
                       } else {
-                          if (ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-                              ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 100)
+                          val permissions = mutableListOf(Manifest.permission.RECORD_AUDIO)
+                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                              permissions.add(Manifest.permission.POST_NOTIFICATIONS)
+                          }
+                          
+                          val neededPermissions = permissions.filter {
+                              ActivityCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+                          }
+
+                          if (neededPermissions.isNotEmpty()) {
+                              ActivityCompat.requestPermissions(this, neededPermissions.toTypedArray(), 100)
                               return@setOnClickListener
                           }
-                          val ip = etIp.text.toString().trim()
-                          val port = etPort.text.toString().trim().toIntOrNull() ?: 50005
-                          if (ip.isEmpty()) {
+
+                          ipAddress = etIp.text.toString().trim()
+                          portNumber = etPort.text.toString().trim().toIntOrNull() ?: 50005
+                          if (ipAddress.isEmpty()) {
                               Toast.makeText(this, "Enter PC IP Address!", Toast.LENGTH_SHORT).show()
                               return@setOnClickListener
                           }
-                          isStreaming = true
+
+                          val mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                          startActivityForResult(mediaProjectionManager.createScreenCaptureIntent(), REQUEST_MEDIA_PROJECTION)
+                      }
+                  }
+              }
+
+              override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+                  super.onActivityResult(requestCode, resultCode, data)
+                  if (requestCode == REQUEST_MEDIA_PROJECTION) {
+                      if (resultCode == RESULT_OK && data != null) {
+                          val serviceIntent = Intent(this, AudioCaptureService::class.java).apply {
+                              putExtra("IP", ipAddress)
+                              putExtra("PORT", portNumber)
+                              putExtra("RESULT_CODE", resultCode)
+                              putExtra("RESULT_DATA", data)
+                          }
+                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                              startForegroundService(serviceIntent)
+                          } else {
+                              startService(serviceIntent)
+                          }
+                          isServiceRunning = true
+                          val btnStream = findViewById<Button>(R.id.btnStream)
                           btnStream.text = "STOP STREAMING"
                           btnStream.setBackgroundColor(android.graphics.Color.parseColor("#FF3B30"))
-                          startAudioStream(ip, port)
+                      } else {
+                          Toast.makeText(this, "Permission denied!", Toast.LENGTH_SHORT).show()
                       }
+                  }
+              }
+
+              private fun stopAudioService() {
+                  val serviceIntent = Intent(this, AudioCaptureService::class.java)
+                  stopService(serviceIntent)
+                  isServiceRunning = false
+              }
+          }
+
+          class AudioCaptureService : Service() {
+              private var isStreaming = false
+              private var socket: DatagramSocket? = null
+              private var mediaProjection: MediaProjection? = null
+              private var audioRecord: AudioRecord? = null
+              private var audioManager: AudioManager? = null
+              private var originalVolume = 0
+
+              override fun onBind(intent: Intent?): IBinder? = null
+
+              override fun onCreate() {
+                  super.onCreate()
+                  audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+              }
+
+              override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+                  val ip = intent?.getStringExtra("IP") ?: ""
+                  val port = intent?.getIntExtra("PORT", 50005) ?: 50005
+                  val resultCode = intent?.getIntExtra("RESULT_CODE", 0) ?: 0
+                  val resultData = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                      intent?.getParcelableExtra("RESULT_DATA", Intent::class.java)
+                  } else {
+                      intent?.getParcelableExtra("RESULT_DATA")
+                  }
+
+                  if (ip.isEmpty() || resultCode == 0 || resultData == null) {
+                      stopSelf()
+                      return START_NOT_STICKY
+                  }
+
+                  startNotification()
+
+                  val mpManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                  mediaProjection = mpManager.getMediaProjection(resultCode, resultData)
+
+                  if (mediaProjection != null) {
+                      isStreaming = true
+                      
+                      // Save current volume level & Mute the device speaker silently
+                      audioManager?.let {
+                          originalVolume = it.getStreamVolume(AudioManager.STREAM_MUSIC)
+                          it.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0)
+                      }
+                      
+                      startAudioStream(ip, port)
+                  } else {
+                      stopSelf()
+                  }
+
+                  return START_STICKY
+              }
+
+              private fun startNotification() {
+                  val channelId = "WiFiAudioChannel"
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      val channel = NotificationChannel(channelId, "Wi-Fi Audio Streaming", NotificationManager.IMPORTANCE_LOW)
+                      val manager = getSystemService(NotificationManager::class.java)
+                      manager?.createNotificationChannel(channel)
+                  }
+                  val notification: Notification = NotificationCompat.Builder(this, channelId)
+                      .setContentTitle("Wi-Fi Audio Streaming")
+                      .setContentText("Streaming internal audio silently to PC...")
+                      .setSmallIcon(android.R.drawable.ic_media_play)
+                      .build()
+                  
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                      startForeground(1, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+                  } else {
+                      startForeground(1, notification)
                   }
               }
 
@@ -197,27 +335,70 @@ jobs:
                           socket = DatagramSocket()
                           val address = InetAddress.getByName(ip)
                           val sampleRate = 22050
-                          val bufferSize = AudioRecord.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT) * 2
                           
-                          val audioRecord = AudioRecord(MediaRecorder.AudioSource.MIC, sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bufferSize)
-                          val buffer = ByteArray(1024)
-                          audioRecord.startRecording()
+                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && mediaProjection != null) {
+                              val config = AudioPlaybackCaptureConfig.Builder(mediaProjection!!)
+                                  .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
+                                  .addMatchingUsage(AudioAttributes.USAGE_GAME)
+                                  .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
+                                  .build()
 
-                          while (isStreaming) {
-                              val read = audioRecord.read(buffer, 0, buffer.size)
-                              if (read > 0) {
-                                  val packet = DatagramPacket(buffer, read, address, port)
-                                  socket?.send(packet)
+                              val bufferSize = AudioRecord.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT) * 2
+                              
+                              if (ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                                  audioRecord = AudioRecord.Builder()
+                                      .setAudioFormat(AudioFormat.Builder()
+                                          .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                                          .setSampleRate(sampleRate)
+                                          .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
+                                          .build())
+                                      .setAudioPlaybackCaptureConfig(config)
+                                      .setBufferSizeInBytes(bufferSize)
+                                      .build()
+
+                                  val buffer = ByteArray(1024)
+                                  audioRecord?.startRecording()
+
+                                  while (isStreaming) {
+                                      val read = audioRecord?.read(buffer, 0, buffer.size) ?: 0
+                                      if (read > 0) {
+                                          val packet = DatagramPacket(buffer, read, address, port)
+                                          socket?.send(packet)
+                                      }
+                                  }
                               }
                           }
-                          audioRecord.stop()
-                          audioRecord.release()
-                          socket?.close()
                       } catch (e: Exception) {
-                          runOnUiThread { Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_LONG).show() }
-                          isStreaming = false
+                          e.printStackTrace()
+                      } finally {
+                          stopStreaming()
                       }
                   }
+              }
+
+              private fun stopStreaming() {
+                  isStreaming = false
+                  
+                  // Restore phone's original volume when streaming stops
+                  audioManager?.let {
+                      it.setStreamVolume(AudioManager.STREAM_MUSIC, originalVolume, 0)
+                  }
+
+                  try {
+                      audioRecord?.stop()
+                      audioRecord?.release()
+                  } catch (e: Exception) {}
+                  try {
+                      mediaProjection?.stop()
+                  } catch (e: Exception) {}
+                  socket?.close()
+                  stopForeground(true)
+                  stopSelf()
+              }
+
+              override fun onDestroy() {
+                  stopStreaming()
+                  super.onDestroy()
               }
           }
           EOF
