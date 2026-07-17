@@ -14,7 +14,7 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
 
-      - name: Setup Stable Gradle
+      - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.1.1
@@ -25,7 +25,12 @@ jobs:
           mkdir -p app/src/main/res/layout
           mkdir -p app/src/main/res/values
 
-          # 1. Root settings.gradle (Groovy Format)
+          # 1. AndroidX Support Enabler (gradle.properties)
+          cat << 'EOF' > gradle.properties
+          android.useAndroidX=true
+          EOF
+
+          # 2. Root settings.gradle (Safe Repository Mode)
           cat << 'EOF' > settings.gradle
           pluginManagement {
               repositories {
@@ -35,7 +40,7 @@ jobs:
               }
           }
           dependencyResolutionManagement {
-              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
               repositories {
                   google()
                   mavenCentral()
@@ -45,21 +50,15 @@ jobs:
           include ':app'
           EOF
 
-          # 2. Root build.gradle (Groovy Format)
+          # 3. Root build.gradle (Modern Declarative Plugins Block)
           cat << 'EOF' > build.gradle
-          buildscript {
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-              dependencies {
-                  classpath "com.android.tools.build:gradle:8.1.0"
-                  classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:1.8.20"
-              }
+          plugins {
+              id 'com.android.application' version '8.1.1' apply false
+              id 'org.jetbrains.kotlin.android' version '1.8.20' apply false
           }
           EOF
 
-          # 3. App build.gradle (Groovy Format)
+          # 4. App build.gradle (Groovy Format)
           cat << 'EOF' > app/build.gradle
           plugins {
               id 'com.android.application'
@@ -68,12 +67,12 @@ jobs:
 
           android {
               namespace 'com.example.wifiaudio'
-              compileSdk 33
+              compileSdk 34
 
               defaultConfig {
                   applicationId "com.example.wifiaudio"
                   minSdk 26
-                  targetSdk 33
+                  targetSdk 34
                   versionCode 1
                   versionName "1.0"
               }
@@ -97,7 +96,7 @@ jobs:
           }
           EOF
 
-          # 4. Android Manifest
+          # 5. Android Manifest
           cat << 'EOF' > app/src/main/AndroidManifest.xml
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET" />
@@ -116,12 +115,12 @@ jobs:
           </manifest>
           EOF
 
-          # 5. Strings XML
+          # 6. Strings XML
           cat << 'EOF' > app/src/main/res/values/strings.xml
           <resources><string name="app_name">Wi-Fi Audio</string></resources>
           EOF
 
-          # 6. Activity Main Layout (Cyber Green Dark Theme UI)
+          # 7. Activity Main Layout (Cyber Green Dark Theme UI)
           cat << 'EOF' > app/src/main/res/layout/activity_main.xml
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
               android:layout_width="match_parent" android:layout_height="match_parent"
@@ -137,7 +136,7 @@ jobs:
           </LinearLayout>
           EOF
 
-          # 7. MainActivity.kt (High-speed UDP Streamer)
+          # 8. MainActivity.kt (High-speed UDP Streamer)
           cat << 'EOF' > app/src/main/java/com/example/wifiaudio/MainActivity.kt
           package com.example.wifiaudio
           import android.Manifest
@@ -223,8 +222,11 @@ jobs:
           }
           EOF
 
+      - name: Generate Local Wrapper
+        run: gradle wrapper --gradle-version 8.1.1
+
       - name: Compile App Package (Build APK)
-        run: gradle assembleDebug
+        run: ./gradlew assembleDebug
 
       - name: Upload Finished APK
         uses: actions/upload-artifact@v4
