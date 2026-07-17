@@ -58,7 +58,7 @@ jobs:
           }
           EOF
 
-          # 4. App build.gradle (Groovy Format)
+          # 4. App build.gradle
           cat << 'EOF' > app/build.gradle
           plugins {
               id 'com.android.application'
@@ -96,7 +96,7 @@ jobs:
           }
           EOF
 
-          # 5. Android Manifest (With Foreground Services and MediaProjection Permissions)
+          # 5. Android Manifest
           cat << 'EOF' > app/src/main/AndroidManifest.xml
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET" />
@@ -130,7 +130,7 @@ jobs:
           <resources><string name="app_name">Wi-Fi Audio</string></resources>
           EOF
 
-          # 7. Activity Main Layout (Cyber Green Dark Theme UI)
+          # 7. Activity Main Layout (Fixing the layout compile error)
           cat << 'EOF' > app/src/main/res/layout/activity_main.xml
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
               android:layout_width="match_parent" android:layout_height="match_parent"
@@ -142,11 +142,11 @@ jobs:
               <EditText android:id="@+id/etPort" android:layout_width="match_parent" android:layout_height="50dp"
                   android:text="50005" android:textColor="#FFFFFF" android:backgroundTint="#00FF41" android:inputType="number" android:layout_marginBottom="30dp"/>
               <Button android:id="@+id/btnStream" android:layout_width="match_parent" android:layout_height="55dp"
-                  **START STREAMING** android:backgroundTint="#008024" android:textColor="#FFFFFF" android:textStyle="bold"/>
+                  android:text="START STREAMING" android:backgroundTint="#008024" android:textColor="#FFFFFF" android:textStyle="bold"/>
           </LinearLayout>
           EOF
 
-          # 8. MainActivity.kt (Explicit Types & Context Compatibility Fixes)
+          # 8. MainActivity.kt
           cat << 'EOF' > app/src/main/java/com/example/wifiaudio/MainActivity.kt
           package com.example.wifiaudio
           import android.Manifest
@@ -278,7 +278,6 @@ jobs:
                   val port = intent?.getIntExtra("PORT", 50005) ?: 50005
                   val resultCode = intent?.getIntExtra("RESULT_CODE", 0) ?: 0
                   
-                  // Explicitly specifying the type 'Intent?' to prevent compiler type mismatch errors
                   val resultData: Intent? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                       intent?.getParcelableExtra("RESULT_DATA", Intent::class.java)
                   } else {
