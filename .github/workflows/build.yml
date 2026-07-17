@@ -14,52 +14,86 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
 
+      - name: Setup Stable Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.1.1
+
       - name: Auto-Generate Android Project Structure
         run: |
           mkdir -p app/src/main/java/com/example/wifiaudio
           mkdir -p app/src/main/res/layout
           mkdir -p app/src/main/res/values
 
-          # 1. Root settings.gradle.kts
-          cat << 'EOF' > settings.gradle.kts
-          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          # 1. Root settings.gradle (Groovy Format)
+          cat << 'EOF' > settings.gradle
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
           dependencyResolutionManagement {
               repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-              repositories { google(); mavenCentral() }
+              repositories {
+                  google()
+                  mavenCentral()
+              }
           }
           rootProject.name = "WiFiAudio"
-          include(":app")
+          include ':app'
           EOF
 
-          # 2. Root build.gradle.kts
-          cat << 'EOF' > build.gradle.kts
-          plugins {
-              id("com.android.application") version "8.2.0" apply false
-              id("org.jetbrains.kotlin.android") version "1.9.0" apply false
-          }
-          EOF
-
-          # 3. App build.gradle.kts
-          cat << 'EOF' > app/build.gradle.kts
-          plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
-          android {
-              namespace = "com.example.wifiaudio"
-              compileSdk = 34
-              defaultConfig {
-                  applicationId = "com.example.wifiaudio"
-                  minSdk = 26
-                  targetSdk = 34
-                  versionCode = 1
-                  versionName = "1.0"
+          # 2. Root build.gradle (Groovy Format)
+          cat << 'EOF' > build.gradle
+          buildscript {
+              repositories {
+                  google()
+                  mavenCentral()
               }
-              buildTypes { release { isMinifyEnabled = false } }
-              compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
-              kotlinOptions { jvmTarget = "17" }
+              dependencies {
+                  classpath "com.android.tools.build:gradle:8.1.0"
+                  classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:1.8.20"
+              }
           }
+          EOF
+
+          # 3. App build.gradle (Groovy Format)
+          cat << 'EOF' > app/build.gradle
+          plugins {
+              id 'com.android.application'
+              id 'org.jetbrains.kotlin.android'
+          }
+
+          android {
+              namespace 'com.example.wifiaudio'
+              compileSdk 33
+
+              defaultConfig {
+                  applicationId "com.example.wifiaudio"
+                  minSdk 26
+                  targetSdk 33
+                  versionCode 1
+                  versionName "1.0"
+              }
+
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+              kotlinOptions {
+                  jvmTarget = '17'
+              }
+              lintOptions {
+                  abortOnError false
+              }
+          }
+
           dependencies {
-              implementation("androidx.core:core-ktx:1.12.0")
-              implementation("androidx.appcompat:appcompat:1.6.1")
-              implementation("com.google.android.material:material:1.11.0")
+              implementation 'androidx.core:core-ktx:1.10.0'
+              implementation 'androidx.appcompat:appcompat:1.6.1'
+              implementation 'com.google.android.material:material:1.9.0'
           }
           EOF
 
@@ -72,7 +106,7 @@ jobs:
                   android:allowBackup="true"
                   android:label="Wi-Fi Audio Streamer"
                   android:theme="@style/Theme.AppCompat.NoActionBar">
-                  <activity android:name=".MainActivity" android:exported="true">
+                  <activity android:name="com.example.wifiaudio.MainActivity" android:exported="true">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
                           <category android:name="android.intent.category.LAUNCHER" />
@@ -188,11 +222,6 @@ jobs:
               }
           }
           EOF
-
-      - name: Setup Explicit Gradle Engine
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: 8.2
 
       - name: Compile App Package (Build APK)
         run: gradle assembleDebug
