@@ -189,8 +189,10 @@ jobs:
           }
           EOF
 
-      - name: Setup Gradle Engine
-        uses: gradle/actions/setup-gradle@v3
+      - name: Setup Explicit Gradle Engine
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.2
 
       - name: Compile App Package (Build APK)
         run: gradle assembleDebug
