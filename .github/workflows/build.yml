@@ -142,11 +142,11 @@ jobs:
               <EditText android:id="@+id/etPort" android:layout_width="match_parent" android:layout_height="50dp"
                   android:text="50005" android:textColor="#FFFFFF" android:backgroundTint="#00FF41" android:inputType="number" android:layout_marginBottom="30dp"/>
               <Button android:id="@+id/btnStream" android:layout_width="match_parent" android:layout_height="55dp"
-                  android:text="START STREAMING" android:backgroundTint="#008024" android:textColor="#FFFFFF" android:textStyle="bold"/>
+                  **START STREAMING** android:backgroundTint="#008024" android:textColor="#FFFFFF" android:textStyle="bold"/>
           </LinearLayout>
           EOF
 
-          # 8. MainActivity.kt (Featuring Auto-Muting Internal Audio Capture Service)
+          # 8. MainActivity.kt (Explicit Types & Context Compatibility Fixes)
           cat << 'EOF' > app/src/main/java/com/example/wifiaudio/MainActivity.kt
           package com.example.wifiaudio
           import android.Manifest
@@ -173,6 +173,7 @@ jobs:
           import androidx.appcompat.app.AppCompatActivity
           import androidx.core.app.ActivityCompat
           import androidx.core.app.NotificationCompat
+          import androidx.core.content.ContextCompat
           import java.net.DatagramPacket
           import java.net.DatagramSocket
           import java.net.InetAddress
@@ -204,7 +205,7 @@ jobs:
                           }
                           
                           val neededPermissions = permissions.filter {
-                              ActivityCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+                              ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
                           }
 
                           if (neededPermissions.isNotEmpty()) {
@@ -276,10 +277,13 @@ jobs:
                   val ip = intent?.getStringExtra("IP") ?: ""
                   val port = intent?.getIntExtra("PORT", 50005) ?: 50005
                   val resultCode = intent?.getIntExtra("RESULT_CODE", 0) ?: 0
-                  val resultData = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                  
+                  // Explicitly specifying the type 'Intent?' to prevent compiler type mismatch errors
+                  val resultData: Intent? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                       intent?.getParcelableExtra("RESULT_DATA", Intent::class.java)
                   } else {
-                      intent?.getParcelableExtra("RESULT_DATA")
+                      @Suppress("DEPRECATION")
+                      intent?.getParcelableExtra("RESULT_DATA") as? Intent
                   }
 
                   if (ip.isEmpty() || resultCode == 0 || resultData == null) {
@@ -295,7 +299,6 @@ jobs:
                   if (mediaProjection != null) {
                       isStreaming = true
                       
-                      // Save current volume level & Mute the device speaker silently
                       audioManager?.let {
                           originalVolume = it.getStreamVolume(AudioManager.STREAM_MUSIC)
                           it.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0)
@@ -345,7 +348,7 @@ jobs:
 
                               val bufferSize = AudioRecord.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT) * 2
                               
-                              if (ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                              if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
                                   audioRecord = AudioRecord.Builder()
                                       .setAudioFormat(AudioFormat.Builder()
                                           .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
@@ -379,7 +382,6 @@ jobs:
               private fun stopStreaming() {
                   isStreaming = false
                   
-                  // Restore phone's original volume when streaming stops
                   audioManager?.let {
                       it.setStreamVolume(AudioManager.STREAM_MUSIC, originalVolume, 0)
                   }
